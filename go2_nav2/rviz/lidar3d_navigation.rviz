@@ -1,6 +1,8 @@
 Panels:
 - Class: go2_rviz_controls/SpeedPanel
   Name: Go2 Speed
+- Class: go2_explore_panel/ExplorePanel
+  Name: Go2 Explore
 - Class: rviz_common/Displays
   Name: Displays
 - Class: rviz_common/Views
@@ -12,6 +14,74 @@ Visualization Manager:
     Fixed Frame: lidar3d_map
     Frame Rate: 10
   Displays:
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Camera obstacles
+    Enabled: true
+    Topic:
+      Value: /camera/obstacle_points
+      Reliability Policy: Reliable
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Depth: 1
+    Style: Points
+    Size (Pixels): 3
+    Color Transformer: FlatColor
+    Color: 255; 0; 0
+    Position Transformer: XYZ
+    Decay Time: 0
+  - Class: rviz_default_plugins/Image
+    Name: Camera depth
+    Enabled: false
+    Topic:
+      Value: /camera/obstacle_depth
+      Reliability Policy: Reliable
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Depth: 1
+    Normalize Range: true
+    Median window: 5
+    Min Value: 0
+    Max Value: 1
+  - Class: rviz_default_plugins/Image
+    Name: Front camera
+    Enabled: true
+    Topic:
+      Value: /camera/image_raw
+      Reliability Policy: Reliable
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Depth: 1
+    Normalize Range: true
+    Median window: 5
+    Min Value: 0
+    Max Value: 1
+  - Class: rviz_default_plugins/Image
+    Name: LiDAR on camera
+    Enabled: true
+    Topic:
+      Value: /camera/lidar_overlay
+      Reliability Policy: Reliable
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Depth: 1
+    Normalize Range: true
+    Median window: 5
+    Min Value: 0
+    Max Value: 1
+  - Class: rviz_default_plugins/PointCloud2
+    Name: 3D map (RTAB-Map)
+    Enabled: true
+    Topic:
+      Value: /rtabmap/cloud_map
+      Reliability Policy: Reliable
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Depth: 1
+    Style: Points
+    Size (Pixels): 3
+    Color Transformer: RGB8
+    Position Transformer: XYZ
+    Decay Time: 0
   - Class: rviz_default_plugins/PointCloud2
     Name: URDF shadow returns (removed)
     Enabled: true

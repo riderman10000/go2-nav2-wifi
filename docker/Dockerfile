@@ -20,3 +20,10 @@ WORKDIR /ws
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["bash"]
+
+# Added by Unitree_GO2_Agricultural/scripts/runtime/wifi_nav.sh:
+# apt scipy is built against numpy 1.21; newer numpy crashes it with
+# "ValueError: numpy.dtype size changed".
+USER root
+RUN (python3 -m pip --version >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends python3-pip)) \
+ && python3 -m pip install --no-cache-dir 'numpy<1.25'

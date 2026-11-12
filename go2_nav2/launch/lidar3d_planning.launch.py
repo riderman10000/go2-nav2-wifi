@@ -10,6 +10,33 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def add_floor_clearing(cost):
+    """go2-clearing: an erase-only lidar source that keeps the floor hits.
+
+    The lidar source keeps points 0.15-1.6 m high, and Nav2 erases cells only
+    along rays to points it kept. Rays that hit the floor, which are most of
+    them near the dog (the L1 looks forward and down), were thrown away, so a
+    spot where a person had stood was never erased.
+
+    It reads the raw /lidar3d/registered cloud. By the time this runs the
+    lidar source has been switched to /lidar3d/obstacle_points, which the
+    floor filter has already stripped of floor hits, so copying that topic
+    left nothing to clear with and the floor in front of the dog stayed
+    unknown.
+    """
+    layer = cost['obstacle_layer']
+    layer['observation_sources'] += ' floor_clear'
+    lidar = layer['lidar']
+    layer['floor_clear'] = {
+        'topic': '/lidar3d/registered', 'sensor_frame': lidar['sensor_frame'],
+        'data_type': 'PointCloud2', 'marking': False, 'clearing': True,
+        'min_obstacle_height': -2.0, 'max_obstacle_height': 2.0,
+        'raytrace_min_range': lidar['raytrace_min_range'],
+        'raytrace_max_range': lidar['raytrace_max_range'],
+        'expected_update_rate': 0.0, 'observation_persistence': 0.0,
+    }
+
+
 def configure(context):
     pkg = get_package_share_directory('go2_nav2')
     sim = LaunchConfiguration('use_sim_time').perform(context).lower() == 'true'
@@ -42,10 +69,19 @@ def configure(context):
             'max_on_approach_iterations': 1000, 'max_planning_time': 3.0,
             'smooth_path': False, 'cache_obstacle_heuristic': False,
             'rotation_penalty': 5.0,
+            # go2-clearance: weigh inflation cost more (Smac default 2.0), so
+            # paths keep to the middle of gaps instead of grazing walls.
+            'cost_penalty': 3.0,
         }
-        cost['inflation_layer']['inflation_radius'] = 0.55
+        # go2-clearance: a narrower band (was 0.55) with a slower fall-off (was
+        # 3.0): more of a doorway is low-cost, the middle still cheapest.
+        cost['inflation_layer']['inflation_radius'] = 0.45
+        cost['inflation_layer']['cost_scaling_factor'] = 2.0
+        cost['footprint_padding'] = 0.05  # go2-clearance: gait sway (was 0.03)
         cost['transform_tolerance'] = 0.3
-        cost['obstacle_layer']['lidar']['expected_update_rate'] = 0.8
+        cost['obstacle_layer']['lidar']['expected_update_rate'] = 2.0  # go2-wifi-lidar was: cost['obstacle_layer']['lidar']['expected_update_rate'] = 0.8
+        if os.environ.get('GO2_FLOOR_CLEAR', '1') != '0':  # go2-clearing: 0 = off, for A/B tests
+            add_floor_clearing(cost)
     data['planner_server'] = planner
     fd, path = tempfile.mkstemp(prefix='go2-lidar3d-planner-', suffix='.yaml')
     with os.fdopen(fd, 'w') as stream:

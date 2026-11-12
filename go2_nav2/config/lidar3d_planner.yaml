@@ -18,7 +18,16 @@ global_costmap:
       plugins: [obstacle_layer, inflation_layer]
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
-        observation_sources: lidar
+        observation_sources: lidar yolo
+        yolo:   # wifi_3d_nav.sh: YOLO obstacles (add-yolo-costmap-source.sh)
+          topic: /yolo/obstacles
+          data_type: PointCloud2
+          marking: true
+          clearing: false
+          min_obstacle_height: -10.0
+          max_obstacle_height: 10.0
+          obstacle_max_range: 6.0
+          expected_update_rate: 0.0
         lidar:
           topic: /lidar3d/registered
           sensor_frame: lidar3d_sensor
@@ -27,9 +36,9 @@ global_costmap:
           clearing: true
           min_obstacle_height: 0.15
           max_obstacle_height: 1.6
-          obstacle_min_range: 0.35
+          obstacle_min_range: 0.15
           obstacle_max_range: 12.0
-          raytrace_min_range: 0.35
+          raytrace_min_range: 0.15
           raytrace_max_range: 12.0
           observation_persistence: 0.0
       inflation_layer:

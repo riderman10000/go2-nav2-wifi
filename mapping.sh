@@ -127,6 +127,16 @@ motion_pid=''
 session_mode="$mapping_mode"
 if [[ "$mapping_mode" == lidar3d && "$compute" == jetson ]]; then session_mode=lidar3d-viz; fi
 x_added=0
+# go2-keepalive: true if the robot answers over SSH. After a robot reboot or
+# a Wi-Fi drop the shared connection can be dead, and anything sent through it
+# waits for TCP to give up (15+ minutes). So try it for 10 s; if it is stuck,
+# close it (a local request, instant) and try one fresh connection, which the
+# commands after this then use too.
+robot_answers() {
+  timeout 10 ssh -o BatchMode=yes -S "$ssh_socket" "$target" true >/dev/null 2>&1 && return 0
+  timeout 5 ssh -S "$ssh_socket" -O exit "$target" >/dev/null 2>&1 || true
+  timeout 20 ssh -o BatchMode=yes -o ConnectTimeout=10 -S "$ssh_socket" "$target" true >/dev/null 2>&1
+}
 cleanup() {
   trap '' INT TERM HUP
   if [[ -n "$motion_pid" ]]; then
@@ -136,8 +146,10 @@ cleanup() {
   if [[ "$mapping_started" == 1 ]]; then
     docker exec "$GO2_CONTAINER" bash /ws/scripts/go2-session.sh stop "$session_mode" --owner "$owner" >/dev/null 2>&1 || true
   fi
-  if [[ "$jetson_started" == 1 ]]; then
-    ssh -o BatchMode=yes -S "$ssh_socket" "$target" "docker exec go2-lidar3d-onboard bash /ws/scripts/go2-session.sh stop lidar3d --owner $owner" >/dev/null 2>&1 || true
+  if [[ "$jetson_started" == 1 ]] && ! robot_answers; then
+    echo "Robot not answering over SSH (rebooted or Wi-Fi down): skipped stopping its session and fetching the map. Stop it later: ssh $target docker exec go2-lidar3d-onboard bash /ws/scripts/go2-session.sh stop lidar3d --owner $owner" >&2
+  elif [[ "$jetson_started" == 1 ]]; then
+    timeout 30 ssh -o BatchMode=yes -S "$ssh_socket" "$target" "docker exec go2-lidar3d-onboard bash /ws/scripts/go2-session.sh stop lidar3d --owner $owner" >/dev/null 2>&1 || true
     saved_run="$(sed -n 's@^3D result directory: /ws/maps/lidar3d/\(run-[a-zA-Z0-9_-]*\).*@\1@p' "$log_dir/slam.log" | head -1)"
     if [[ -n "$saved_run" ]] && grep -q '^Result validation failed' "$log_dir/slam.log"; then
       echo "3D session produced no complete map; partial result remains on Jetson: $saved_run" >&2
@@ -148,7 +160,7 @@ cleanup() {
     fi
   fi
   # Private SSH master: closes only the remote relay started by this invocation.
-  ssh -S "$ssh_socket" -O exit "$target" >/dev/null 2>&1 || true
+  timeout 5 ssh -S "$ssh_socket" -O exit "$target" >/dev/null 2>&1 || true
   [[ "$x_added" == 0 ]] || xhost "-SI:localuser:$xuser" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -159,6 +171,8 @@ echo "Connecting to $target (SSH may ask for your robot password)..."
 if [[ "$mapping_mode" == lidar3d && "$backend" == pointlio ]]; then
   echo "Keep the robot still until the first 3D map appears; initialization takes a few seconds."
 fi
+# No SSH keep-alive here: on a weak link (8 s stalls seen 2026-10-29) it ended
+# whole sessions. cleanup() copes with a dead connection instead.
 ssh -o ConnectTimeout=8 -o ControlMaster=yes -o ControlPersist=60 -S "$ssh_socket" "$target" true
 if [[ "$mapping_mode" == lidar3d && "$compute" == jetson ]]; then
   if [[ "$backend" == pointlio_leg ]]; then

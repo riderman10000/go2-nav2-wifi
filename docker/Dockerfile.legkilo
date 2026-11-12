@@ -15,3 +15,10 @@ RUN --mount=type=cache,id=go2-legkilo-build,target=/opt/go2-legkilo-src/build pa
     && bash -c 'source /opt/ros/humble/setup.bash && source /opt/go2-unitree-msgs/local_setup.bash && cd /opt/go2-legkilo-src && MAKEFLAGS=-j1 colcon build --base-paths legkilo msg/unitree_legged_msgs msg/livox_ros_driver2 --merge-install --install-base /opt/go2-legkilo --executor sequential --cmake-args -DLEGKILO_ROS_VERSION=2 -DIRIDESCENCE_VIEWER=OFF -DLEGKILO_MARCH_NATIVE=OFF -DBUILD_TESTING=OFF' \
     && sha256sum /opt/legkilo-go2.patch > /opt/go2-legkilo/patch.sha256 \
     && rm -rf /opt/go2-legkilo-src/log
+
+# Added by Unitree_GO2_Agricultural/scripts/runtime/wifi_nav.sh:
+# apt scipy is built against numpy 1.21; newer numpy crashes it with
+# "ValueError: numpy.dtype size changed".
+USER root
+RUN (python3 -m pip --version >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends python3-pip)) \
+ && python3 -m pip install --no-cache-dir 'numpy<1.25'
