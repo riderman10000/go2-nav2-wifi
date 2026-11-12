@@ -109,6 +109,7 @@ def supervise(root, mode, commands, preflight=None, owner=None, normal_exit_comm
         if preflight:
             children.append(subprocess.Popen(preflight, start_new_session=True))
         print(f'{mode}: {state}; use go2-session.sh stop {mode} or Ctrl+C', flush=True)
+        rviz_restarts = 0  # go2-agri: rviz respawn
         while not stopping:
             if state == 'running' and pending:
                 children.extend(subprocess.Popen(command, start_new_session=True) for command in pending)
@@ -123,6 +124,14 @@ def supervise(root, mode, commands, preflight=None, owner=None, normal_exit_comm
                     children.remove(child)
                     state = 'running'
                     continue
+                crashed = not (info.si_code == os.CLD_EXITED and info.si_status == 0)  # go2-agri: rviz respawn
+                if child.args == normal_exit_command and crashed and rviz_restarts < 5:  # go2-agri: rviz respawn
+                    child.wait()  # go2-agri: rviz respawn
+                    children.remove(child)  # go2-agri: rviz respawn
+                    rviz_restarts += 1  # go2-agri: rviz respawn
+                    print(f'{mode}: RViz crashed (code {info.si_status}); restarting it ({rviz_restarts}/5), the session keeps running', flush=True)  # go2-agri: rviz respawn
+                    children.append(subprocess.Popen(child.args, start_new_session=True))  # go2-agri: rviz respawn
+                    continue  # go2-agri: rviz respawn
                 print(f'{mode}: child exited; stopping owned session', flush=True)
                 if child.args == normal_exit_command and info.si_code == os.CLD_EXITED and info.si_status == 0:
                     return 0

@@ -206,7 +206,7 @@ if [[ "$mapping_mode" == lidar3d && "$compute" == jetson ]]; then
         "$MAPPING_ROOT/ws/scripts/robot_sport_bridge.py" "$MAPPING_ROOT/ws/scripts/go2_cmd_vel_tcp.py" \
         "$MAPPING_ROOT/ws/scripts/robot-source-unitree-ros.sh" "$target:go2-nav2-lidar3d-onboard/"
       ssh -tt -o BatchMode=yes -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -S "$ssh_socket" "$target" \
-        'exec bash ~/go2-nav2-lidar3d-onboard/robot-motion-wifi.sh' >"$log_dir/motion.log" 2>&1 &
+        "GO2_SPORT_WALK_MODE=${GO2_SPORT_WALK_MODE:-free} GO2_SPORT_AVOID=${GO2_SPORT_AVOID:-0} GO2_SPORT_AUTO_RECOVERY=${GO2_SPORT_AUTO_RECOVERY:-1} exec bash ~/go2-nav2-lidar3d-onboard/robot-motion-wifi.sh" >"$log_dir/motion.log" 2>&1 &  # go2-agri: walk mode (wifi_3d_nav.sh --semantic: classic)
       motion_pid=$!
     fi
     docker exec -e GO2_HOST_IP="$robot_host_ip" -e GO2_ROBOT_IP="$robot_ip" -e GO2_RELAY_DOMAIN_ID="$relay_domain" \

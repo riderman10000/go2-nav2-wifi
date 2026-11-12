@@ -17,7 +17,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from unitree_api.msg import Request
+from unitree_api.msg import Request, Response  # go2-agri: recovery/avoid
 
 API_BALANCE_STAND = 1002
 API_STOP_MOVE = 1003
@@ -29,6 +29,10 @@ API_FREE_WALK = 2045
 API_CLASSIC_WALK = 2049
 
 TOPIC_REQUEST = "/api/sport/request"
+API_AUTORECOVERY_SET = 2054  # go2-agri: recovery/avoid
+# Firmware obstacle avoidance (unitree_sdk2 obstacles_avoid_api).  # go2-agri: recovery/avoid
+AVOID_SWITCH_SET, AVOID_SWITCH_GET, AVOID_MOVE, AVOID_USE_API = 1001, 1002, 1003, 1004  # go2-agri: recovery/avoid
+TOPIC_AVOID = "/api/obstacles_avoid/request"  # go2-agri: recovery/avoid
 
 
 def make_request(api_id: int, parameter: str | None = None) -> Request:
@@ -66,6 +70,12 @@ class SportBridge(Node):
         stand_on_start = os.environ.get("GO2_SPORT_STAND_ON_START", "1") != "0"
         stand_mode = os.environ.get("GO2_SPORT_STAND_MODE", "balance")
         walk_mode = os.environ.get("GO2_SPORT_WALK_MODE", "free").lower()
+        self._auto_recovery = os.environ.get("GO2_SPORT_AUTO_RECOVERY", "1") != "0"  # go2-agri: recovery/avoid
+        self._avoid = os.environ.get("GO2_SPORT_AVOID", "0") not in ("", "0")  # go2-agri: recovery/avoid
+        self._sent_ids = set()  # go2-agri: recovery/avoid
+        self._avoid_pub = self.create_publisher(Request, TOPIC_AVOID, 10)  # go2-agri: recovery/avoid
+        self.create_subscription(Response, "/api/obstacles_avoid/response", self._on_reply, 10)  # go2-agri: recovery/avoid
+        self.create_subscription(Response, "/api/sport/response", self._on_reply, 10)  # go2-agri: recovery/avoid
 
         self._cmd_timeout = cmd_timeout
         self._cmd_count = 0
@@ -116,7 +126,57 @@ class SportBridge(Node):
             self._send(API_FREE_WALK)
             self.get_logger().info("FreeWalk")
         time.sleep(0.4)
+        self._init_features()  # go2-agri: recovery/avoid
 
+    def _init_features(self) -> None:  # go2-agri: recovery/avoid
+        """Fall recovery and obstacle avoidance (sport_bridge_features.py)."""  # go2-agri: recovery/avoid
+        if self._auto_recovery:  # go2-agri: recovery/avoid
+            self._reply_call(self._pub, API_AUTORECOVERY_SET, {"data": True})  # go2-agri: recovery/avoid
+            self.get_logger().info("AutoRecoverySet(true): the dog stands up by itself after a fall")  # go2-agri: recovery/avoid
+        if self._avoid:  # go2-agri: recovery/avoid
+            self._reply_call(self._avoid_pub, AVOID_SWITCH_SET, {"enable": True})  # go2-agri: recovery/avoid
+            time.sleep(0.3)  # go2-agri: recovery/avoid
+            self._reply_call(self._avoid_pub, AVOID_USE_API, {"is_remote_commands_from_api": True})  # go2-agri: recovery/avoid
+            self.get_logger().info("Obstacle avoidance on: walking through /api/obstacles_avoid (forward only)")  # go2-agri: recovery/avoid
+        else:  # go2-agri: recovery/avoid
+            # Off unless asked for: the switch survives a reboot, so a session that died  # go2-agri: recovery/avoid
+            # without its cleanup would otherwise leave it on (seen 2026-11-12).  # go2-agri: recovery/avoid
+            self._reply_call(self._avoid_pub, AVOID_USE_API, {"is_remote_commands_from_api": False})  # go2-agri: recovery/avoid
+            self._reply_call(self._avoid_pub, AVOID_SWITCH_SET, {"enable": False})  # go2-agri: recovery/avoid
+        time.sleep(0.3)  # go2-agri: recovery/avoid
+  # go2-agri: recovery/avoid
+    def _reply_call(self, pub, api_id: int, data: dict) -> None:  # go2-agri: recovery/avoid
+        req = make_request(api_id, json.dumps(data))  # go2-agri: recovery/avoid
+        req.header.identity.id = int(time.time() * 1000) % 2**31  # go2-agri: recovery/avoid
+        req.header.policy.noreply = False  # go2-agri: recovery/avoid
+        self._sent_ids.add(req.header.identity.id)  # go2-agri: recovery/avoid
+        pub.publish(req)  # go2-agri: recovery/avoid
+  # go2-agri: recovery/avoid
+    def _on_reply(self, msg) -> None:  # go2-agri: recovery/avoid
+        # Only replies to this bridge's own requests: other clients on the dog poll  # go2-agri: recovery/avoid
+        # the avoidance switch (api 1002) about 10 times a second.  # go2-agri: recovery/avoid
+        api = msg.header.identity.api_id  # go2-agri: recovery/avoid
+        if msg.header.identity.id in self._sent_ids:  # go2-agri: recovery/avoid
+            self._sent_ids.discard(msg.header.identity.id)  # go2-agri: recovery/avoid
+            code = msg.header.status.code  # go2-agri: recovery/avoid
+            log = self.get_logger().info if code == 0 else self.get_logger().warn  # go2-agri: recovery/avoid
+            log(f"reply api {api}: code {code}{' (ok)' if code == 0 else ' (refused)'} {msg.data}")  # go2-agri: recovery/avoid
+  # go2-agri: recovery/avoid
+    def _move(self, vx: float, vy: float, vyaw: float) -> None:  # go2-agri: recovery/avoid
+        if self._avoid:  # go2-agri: recovery/avoid
+            self._avoid_pub.publish(make_request(AVOID_MOVE, json.dumps({"x": vx, "y": vy, "yaw": vyaw, "mode": 0})))  # go2-agri: recovery/avoid
+        else:  # go2-agri: recovery/avoid
+            self._send(API_MOVE, json.dumps({"x": vx, "y": vy, "z": vyaw}))  # go2-agri: recovery/avoid
+  # go2-agri: recovery/avoid
+    def _halt(self, final: bool = False) -> None:  # go2-agri: recovery/avoid
+        if self._avoid:  # go2-agri: recovery/avoid
+            self._avoid_pub.publish(make_request(AVOID_MOVE, json.dumps({"x": 0.0, "y": 0.0, "yaw": 0.0, "mode": 0})))  # go2-agri: recovery/avoid
+            if final:  # go2-agri: recovery/avoid
+                self._reply_call(self._avoid_pub, AVOID_USE_API, {"is_remote_commands_from_api": False})  # go2-agri: recovery/avoid
+                self._reply_call(self._avoid_pub, AVOID_SWITCH_SET, {"enable": False})  # go2-agri: recovery/avoid
+                self.get_logger().info("Obstacle avoidance off")  # go2-agri: recovery/avoid
+        self._send(API_STOP_MOVE)  # go2-agri: recovery/avoid
+  # go2-agri: recovery/avoid
     def _on_cmd_vel(self, msg: Twist) -> None:
         self._last_cmd = msg
         self._last_cmd_time = time.monotonic()
@@ -137,7 +197,7 @@ class SportBridge(Node):
         stale = self._last_cmd_time == 0.0 or age > self._cmd_timeout
         if stale:
             if not self._stopped:
-                self._send(API_STOP_MOVE)
+                self._halt()  # go2-agri: recovery/avoid
                 self._stopped = True
             return
 
@@ -149,7 +209,7 @@ class SportBridge(Node):
             vy = clamp(vy, self._max_lin)
         if self._max_ang is not None:
             vyaw = clamp(vyaw, self._max_ang)
-        self._send(API_MOVE, json.dumps({"x": vx, "y": vy, "z": vyaw}))
+        self._move(vx, vy, vyaw)  # go2-agri: recovery/avoid
         self._stopped = False
 
 
@@ -171,7 +231,7 @@ def main() -> None:
         try:
             if rclpy.ok():
                 node.get_logger().info("StopMove")
-                node._send(API_STOP_MOVE)
+                node._halt(final=True)  # go2-agri: recovery/avoid
         finally:
             node.destroy_node()
             if rclpy.ok():
